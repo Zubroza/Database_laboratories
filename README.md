@@ -26,7 +26,7 @@ Telegram [@fnsyqu]
 
 Вывести информацию о сессиях: ID клиента, модели и компьютера, время сеанса и отсортированную по убыванию суммарной стоимости сеанса
 
-## Лабораторная работа 1 (Проектирование логической и физической модели БД)
+## Лабораторная работа 1. Проектирование логической и физической модели БД
 
 ### ER-диаграмма
 
@@ -106,7 +106,7 @@ erDiagram
 - В таблице `model` атрибуты CPU, GPU, RAM зависят только от model_id
 - В таблице `service` цена услуги зависит только от service_id
 
-# Лабораторная работа 2 (Создание и наполнение таблиц) 
+## Лабораторная работа 2. Создание и наполнение таблиц 
 *Создание таблиц*
 
 ```sql
@@ -361,7 +361,7 @@ FROM tumunbayarovts02271.sessions_info si
 JOIN tumunbayarovts02271.computers_table ct ON si.computer_id = ct.computer_id;
 ```
 
-## 4 Лабораторная работа Анализ производительности
+## Лабораторная работа 4. Анализ производительности
 
 Цель: Освоение методов анализа и оптимизации производительности БД.
 
@@ -439,3 +439,155 @@ CREATE INDEX name_idx ON tumunbayarovts02271.customers_table(name);
 ```
 
 ### Сравнение производительности до и после добавления индексов:
+
+До добавления индексов: 11.773 ms
+
+<img src="./pictures/before_index_add.jpg" alt="Фото до оптимизации. Время выполнения: 11.773" width="500">
+
+После добавления индексов: 3.737 ms
+
+<img src="./pictures/after_index_add.jpg" alt="Фото после оптимизации. Время выполнения: 3.737" width="500">
+
+Добавление индексов значительно уменьшило время выполнения запроса.
+
+## Лабораторная работа 5. Триггеры и аудит
+
+*Цель*: Реализация бизнес-логики на уровне БД и системы аудита.
+
+📋 Задачи:
+
+1. Триггеры каскадного удаления для связей “один-ко-многим”
+2. Триггеры аудита изменений (INSERT, UPDATE, DELETE)
+3. Создание таблицы-журнала для отслеживания изменений
+
+### Триггеры каскадного удаления для связей “один-ко-многим”
+
+Удаление заказов клиента:
+
+```sql
+CREATE OR REPLACE FUNCTION tumunbayarovts02271.cascade_delete_customer_orders()
+    RETURNS trigger
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE NOT LEAKPROOF
+AS $BODY$
+BEGIN
+    INSERT INTO tumunbayarovts02271.audit_log (
+        table_name, stamp, operation, old_data, new_data
+    )
+    SELECT 
+        'orders_table', CURRENT_TIMESTAMP, 'CASCADE_DELETE', row_to_json(o), NULL
+    FROM tumunbayarovts02271.orders_table o
+    WHERE o.customer_id = OLD.customer_id;
+    
+    DELETE FROM tumunbayarovts02271.orders_table 
+    WHERE customer_id = OLD.customer_id;
+    RETURN OLD;
+END;
+$BODY$;
+
+ALTER FUNCTION tumunbayarovts02271.cascade_delete_customer_orders()
+    OWNER TO student;
+```
+
+Удаление сессий клиента:
+
+```sql
+CREATE OR REPLACE FUNCTION tumunbayarovts02271.cascade_delete_customer_sessions()
+    RETURNS trigger
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE NOT LEAKPROOF
+AS $BODY$
+BEGIN
+    INSERT INTO tumunbayarovts02271.audit_log (
+        table_name, stamp, operation, old_data, new_data
+    )
+    SELECT 
+        'sessions_table', CURRENT_TIMESTAMP, 'CASCADE_DELETE', row_to_json(s), NULL
+    FROM tumunbayarovts02271.sessions_table s
+    WHERE s.customer_id = OLD.customer_id;
+    
+    DELETE FROM tumunbayarovts02271.sessions_table 
+    WHERE customer_id = OLD.customer_id;
+    RETURN OLD;
+END;
+$BODY$;
+
+ALTER FUNCTION tumunbayarovts02271.cascade_delete_customer_sessions()
+    OWNER TO student;
+```
+
+### Триггеры аудита изменений (INSERT, UPDATE, DELETE)
+
+```sql
+CREATE OR REPLACE FUNCTION tumunbayarovts02271.audit_trigger_function()
+    RETURNS trigger
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE NOT LEAKPROOF
+AS $BODY$
+BEGIN
+    --INSERT
+    IF TG_OP = 'INSERT' THEN
+        INSERT INTO tumunbayarovts02271.audit_log (
+            table_name, stamp, operation, new_data
+        ) VALUES (
+            TG_TABLE_NAME, 
+            CURRENT_TIMESTAMP, 
+            'INSERT', 
+            row_to_json(NEW)
+        );
+        
+    --UPDATE
+    ELSIF TG_OP = 'UPDATE' THEN
+        INSERT INTO tumunbayarovts02271.audit_log (
+            table_name, stamp, operation, old_data, new_data
+        ) VALUES (
+            TG_TABLE_NAME, 
+            CURRENT_TIMESTAMP, 
+            'UPDATE', 
+            row_to_json(OLD), 
+            row_to_json(NEW)
+        );
+        
+    -- DELETE
+    ELSIF TG_OP = 'DELETE' THEN
+        INSERT INTO tumunbayarovts02271.audit_log (
+            table_name, stamp, operation, old_data
+        ) VALUES (
+            TG_TABLE_NAME, 
+            CURRENT_TIMESTAMP, 
+            'DELETE', 
+            row_to_json(OLD)
+        );
+    END IF;
+    
+    RETURN COALESCE(NEW, OLD);
+END;
+$BODY$;
+
+ALTER FUNCTION tumunbayarovts02271.audit_trigger_function()
+    OWNER TO student;
+```
+
+### Создание таблицы-журнала для отслеживания изменений
+
+```sql
+CREATE TABLE IF NOT EXISTS tumunbayarovts02271.audit_log
+(
+    audit_id integer NOT NULL DEFAULT nextval('tumunbayarovts02271.audit_log_audit_id_seq'::regclass),
+    table_name character varying(100) COLLATE pg_catalog."default" NOT NULL,
+    stamp timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    operation character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    old_data jsonb,
+    new_data jsonb,
+    CONSTRAINT audit_log_pkey PRIMARY KEY (audit_id),
+    CONSTRAINT audit_log_operation_check CHECK (operation::text = ANY (ARRAY['INSERT'::character varying, 'UPDATE'::character varying, 'DELETE'::character varying, 'CASCADE_DELETE'::character varying]::text[]))
+)
+
+TABLESPACE pg_default;
+
+ALTER TABLE IF EXISTS tumunbayarovts02271.audit_log
+    OWNER to student;
+```
