@@ -591,3 +591,7 @@ TABLESPACE pg_default;
 ALTER TABLE IF EXISTS tumunbayarovts02271.audit_log
     OWNER to student;
 ```
+
+Работает:
+
+<img src="./pictures/audit_log.jpg" alt="audit_log работает" width="500">
